@@ -1,5 +1,6 @@
 # beaconframer --os mac
 # beaconframer --help
+# windows and mac currently not supported
 
 import sys
 import os
@@ -12,6 +13,8 @@ import shlex
 import time
 import threading
 import platform
+import subprocess
+
 locky = threading.Lock()
 
 os.system("clear")
@@ -19,16 +22,7 @@ os.system("clear")
 version = "1.0.0"
 operationSystem = None
 verbose = False
-
-
-def showHelpInformation():
-    print "\n"
-    print "You are using the version", version
-    print """
-This is the help text for Beacon Framer
-    --os [mac/win/lin]      which operating system are you using 
-    
-    """
+interfaceName = None
 
 
 def displayWelcomeText():
@@ -51,6 +45,11 @@ def log(string):
             time.time()).strftime('%Y-%m-%d %H:%M:%S')
         print "[", st, "] ", string
 
+def logAnywhere(string):
+    st = datetime.datetime.fromtimestamp(
+            time.time()).strftime('%Y-%m-%d %H:%M:%S')
+    print "[", st, "] ", string
+
 
 def detectOperationSystem():
     returnVal = None
@@ -58,12 +57,16 @@ def detectOperationSystem():
     if systemName == 'Darwin'.upper():
         log("Detected Operation System: Mac Os is running")
         returnVal = 'mac'
-    elif systemName == '':
+    elif systemName == 'LINUX':
         log("Detected Operation System: Linux is running")
         returnVal = 'lin'
     elif systemName == '':
         log("Detected Operation System: Windows is running")
         returnVal = 'win'
+    else:
+	log("Operation system not detected! Found: {}".format(systemName))
+	print "Exiting Program"
+	sys.exit()
 
     return returnVal
 
@@ -77,7 +80,16 @@ def setMonitorMode():
         setMonitorModeLin()
 
 def setMonitorModeLin():
+    global interfaceName
+
     log("Monitoring mode for linux!")
+    try:
+    	subprocess.call(["sudo ifconfig {} down".format(interfaceName)])
+    	subprocess.call(["sudo iwconfig {} mode monitor".format(interfaceName)])
+    except OSError:
+	logAnywhere("Error while setting Interface {} into monitor mode. Cause: Unsupported wireless card or wrong interface name".format(interfaceName))
+	sys.exit()
+    log("Interface {} set in monitor mode".format(interfaceName))
 
 def setMonitorModeMac():
 
@@ -99,6 +111,7 @@ def Change_Freq_channel(channel_c):
 def main():
     global verbose
     global operationSystem
+    global interfaceName
 
     displayWelcomeText()
 
@@ -125,6 +138,8 @@ def main():
     else:
         log("Operation System is set, no autodetect needed")
         operationSystem = args.os
+
+    interfaceName = args.interface
 
     log("Starting to set interface in monitor mode")
     setMonitorMode()
