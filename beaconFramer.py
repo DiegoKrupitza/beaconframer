@@ -1,6 +1,7 @@
 # beaconframer --os mac
 # beaconframer --help
-# windows and mac currently not supported
+# windows and mac currently not supported only linux
+# storm example:  python beaconFramer.py -v -i wlan0 --storm
 
 import sys
 import os
@@ -14,6 +15,7 @@ import time
 import threading
 import platform
 import subprocess
+from scapy.all import Dot11,Dot11Beacon,Dot11Elt,RadioTap,sendp,hexdump,RandMAC
 
 locky = threading.Lock()
 
@@ -23,6 +25,7 @@ version = "1.0.0"
 operationSystem = None
 verbose = False
 interfaceName = None
+monitorInterface = None
 
 
 def displayWelcomeText():
@@ -37,7 +40,7 @@ def displayWelcomeText():
                                                                         """
     print "############################################################################"
 
-
+#########################################################################
 def log(string):
     global verbose
     if(verbose):
@@ -49,6 +52,17 @@ def logAnywhere(string):
     st = datetime.datetime.fromtimestamp(
             time.time()).strftime('%Y-%m-%d %H:%M:%S')
     print "[", st, "] ", string
+
+def cleanUpInterface():
+    global interfaceName
+
+    os.system("airmon-ng stop {}".format(interfaceName + "mon"))
+    os.system("service network-manager start")
+
+#########################################################################
+
+def cleanUp():
+    cleanUpInterface()
 
 
 def detectOperationSystem():
@@ -81,15 +95,21 @@ def setMonitorMode():
 
 def setMonitorModeLin():
     global interfaceName
-
+    global monitorInterface
+   
+    
     log("Monitoring mode for linux!")
-    try:
-    	subprocess.call(["sudo ifconfig {} down".format(interfaceName)])
-    	subprocess.call(["sudo iwconfig {} mode monitor".format(interfaceName)])
-    except OSError:
+    os.system("service network-manager stop")
+    
+
+    interfaceAirmon = os.system("airmon-ng start {}".format(interfaceName))
+
+    if interfaceAirmon != 0:
 	logAnywhere("Error while setting Interface {} into monitor mode. Cause: Unsupported wireless card or wrong interface name".format(interfaceName))
 	sys.exit()
+
     log("Interface {} set in monitor mode".format(interfaceName))
+    monitorInterface = interfaceName + "mon"
 
 def setMonitorModeMac():
 
@@ -99,14 +119,39 @@ def setMonitorModeMac():
         os.system("sudo ln -s /System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport /usr/local/bin/airport")
 
 
-def Change_Freq_channel(channel_c):
-    # TODO change
-    print('Channel:', str(channel_c))
-    command = 'iwconfig wlan1mon channel '+str(channel_c)
-    command = shlex.split(command)
-    # To prevent shell injection attacks !
-    subprocess.Popen(command, shell=False)
+def stormWithBeaconFrames():
+    global interfaceName
+    global monitorInterface
+    log("Starting with storming on interface [{}]".format(interfaceName))
+    
+    netSSID = 'testSSID'       #Network name here
+    iface = 'wlan0mon'         #Interface name here
 
+    dot11 = Dot11(type=0, subtype=8, addr1='ff:ff:ff:ff:ff:ff', addr2=str(RandMAC()), addr3=str(RandMAC()))
+    
+    beacon = Dot11Beacon(cap='ESS+privacy')
+    essid = Dot11Elt(ID='SSID',info=netSSID, len=len(netSSID))
+    rsn = Dot11Elt(ID='RSNinfo', info=(
+'\x01\x00'                 #RSN Version 1
+'\x00\x0f\xac\x02'         #Group Cipher Suite : 00-0f-ac TKIP
+'\x02\x00'                 #2 Pairwise Cipher Suites (next two lines)
+'\x00\x0f\xac\x04'         #AES Cipher
+'\x00\x0f\xac\x02'         #TKIP Cipher
+'\x01\x00'                 #1 Authentication Key Managment Suite (line below)
+'\x00\x0f\xac\x02'         #Pre-Shared Key
+'\x00\x00'))               #RSN Capabilities (no extra capabilities)
+
+    frame = RadioTap()/dot11/beacon/essid/rsn
+
+    frame.show()
+    print("\nHexdump of frame:")
+    hexdump(frame)
+    raw_input("\nPress enter to start\n")
+
+    sendp(frame, iface=iface, inter=0.100, loop=1)
+
+
+    
 
 def main():
     global verbose
@@ -121,17 +166,29 @@ def main():
     parser.add_argument(
         '-i', '--interface', help='Which interface card you want to use to analyse the area around you.', required=True)
     parser.add_argument(
-        '-s', '--storm', help='Storms the area around you with AP from the list')
+        '-s', '--storm', dest='storm', action='store_true', help='Storms the area around you with AP from the list')
 
     parser.add_argument(
         '-os', help="Defines which operation system you are using. Format [mac/win/lin]")
     parser.add_argument('-v', dest='verbose', action='store_true',
                         help='Set if you would like to recive log informations')
+    parser.add_argument('--cleanUp', dest='cleanUp', action='store_true',
+                        help='Cleans up every change made by the script')
 
     args, leftovers = parser.parse_known_args()
 
     verbose = args.verbose
 
+    interfaceName = args.interface
+
+    # Clean up
+    if args.cleanUp:
+	log("Cleaning up all changes made by the script")
+	#cleanUp()
+	log("Finished with cleaning! Have a nice day :)")
+	sys.exit()
+
+    # Analyzing the os flag
     if args.os == None:
         log("Operation System is not set, we have to autodetec it")
         operationSystem = detectOperationSystem()
@@ -139,10 +196,14 @@ def main():
         log("Operation System is set, no autodetect needed")
         operationSystem = args.os
 
-    interfaceName = args.interface
-
+    
+    # setting card into monitor mode
     log("Starting to set interface in monitor mode")
-    setMonitorMode()
+    #setMonitorMode()
+
+    if args.storm:
+	stormWithBeaconFrames()
+
 
 
 if __name__ == "__main__":
